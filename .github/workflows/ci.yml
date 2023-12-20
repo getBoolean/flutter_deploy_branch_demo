@@ -1,0 +1,435 @@
+name: CI
+on:
+  push:
+    branches:
+      - '**'
+      - '!gh-pages'
+
+env:
+  FLUTTER_CHANNEL: "stable"
+  FLUTTER_VERSION: "any"
+
+# Needed to deploy to GitHub Pages
+permissions:
+  contents: write
+
+jobs:
+  flutter_test:
+    name: Run flutter test and analyze
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+      - name: Install and set Flutter version
+        uses: subosito/flutter-action@v2
+        with:
+          channel: ${{env.FLUTTER_CHANNEL}}
+          flutter-version: ${{env.FLUTTER_VERSION}}
+          cache: true
+          cache-key: "flutter-:os:-:channel:-:version:-:arch:-:hash:"
+          cache-path: "${{ runner.tool_cache }}/flutter/:channel:-:version:-:arch:"
+          architecture: x64
+
+      - name: Check Flutter Version
+        run: flutter --version
+
+      # Make environment variables available to the melos generate script.
+      #
+      # The environment variables need to be defined in the repository secrets
+      - name: Load Environment Variables
+        uses: oNaiPs/secrets-to-env-action@v1.2
+        with:
+          secrets: ${{ toJSON(secrets) }}
+
+      - name: Activate Melos
+        run: dart pub global activate melos ^3.4.0
+
+      - name: Bootstrap Melos
+        run: melos bootstrap
+
+      # Comment out this task if you don't want to enforce formatting.
+      - name: Verify Formatting
+        run: melos run verify_format
+
+      - name: Analyze
+        run: melos run analyze
+
+      # Project needs to have tests in test/ and a dependency on
+      # package:flutter_test for this step to succeed.
+      #
+      # Each package in the packages/ directory should have its own
+      # test/ directory with tests for that package.
+      - name: Run Tests
+        run: melos run test
+
+      - name: Upload Coverage to Codecov
+        uses: codecov/codecov-action@v3.1.0
+        with:
+          files: "**/*/lcov.info"
+
+  build_ios:
+    name: Build Flutter for iOS (Without Signing)
+    needs: [flutter_test]
+    runs-on: macos-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+      - name: Install and set Flutter version
+        uses: subosito/flutter-action@v2
+        with:
+          channel: ${{env.FLUTTER_CHANNEL}}
+          flutter-version: ${{env.FLUTTER_VERSION}}
+          cache: true
+          cache-key: "flutter-:os:-:channel:-:version:-:arch:-:hash:"
+          cache-path: "${{ runner.tool_cache }}/flutter/:channel:-:version:-:arch:"
+          architecture: x64
+
+      - name: Check Flutter Version
+        run: flutter --version
+
+      # Make environment variables available to the melos generate script.
+      #
+      # The environment variables need to be defined in the repository secrets
+      - name: Load Environment Variables
+        uses: oNaiPs/secrets-to-env-action@v1.2
+        with:
+          secrets: ${{ toJSON(secrets) }}
+
+      - name: Activate Melos
+        run: dart pub global activate melos ^3.4.0
+
+      - name: Bootstrap Melos
+        run: melos bootstrap
+
+      # Zip into IPA from here:
+      # https://gist.github.com/devhammed/617d920b7ee886591a46c22633ab0093
+      - name: Build Flutter IPA
+        run: |
+          flutter build ios --release --no-codesign --dart-define FLAVOR=dev
+          cd build/ios/iphoneos
+          mkdir Payload
+          cd Payload
+          ln -s ../Runner.app
+          cd ..
+          zip -r app-release.ipa Payload
+      - name: Upload IPA
+        uses: actions/upload-artifact@v3
+        with:
+          name: ios_ipa
+          path: build/ios/iphoneos/app-release.ipa
+
+  # build_ios_with_signing:
+  #   name: Build Flutter for iOS (Signed)
+  #   needs: [flutter_test]
+  #   runs-on: macos-latest
+  #   steps:
+  #     - name: Checkout repository
+  #       uses: actions/checkout@v3
+  #       # From github documentation
+  #     - name: Install the Apple certificate, provisioning profile, and Firebase google services
+  #       env:
+  #         BUILD_CERTIFICATE_BASE64: ${{ secrets.BUILD_CERTIFICATE_BASE64 }}
+  #         P12_PASSWORD: ${{ secrets.P12_PASSWORD }}
+  #         BUILD_PROVISION_PROFILE_BASE64: ${{ secrets.BUILD_PROVISION_PROFILE_BASE64 }}
+  #         KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+  #       run: |
+  #         # create variables
+  #         CERTIFICATE_PATH=$RUNNER_TEMP/build_certificate.p12
+  #         PP_PATH=$RUNNER_TEMP/build_pp.mobileprovision
+  #         KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
+
+  #         # import certificate and provisioning profile from secrets
+  #         echo -n "$BUILD_CERTIFICATE_BASE64" | base64 --decode --output $CERTIFICATE_PATH
+  #         echo -n "$BUILD_PROVISION_PROFILE_BASE64" | base64 --decode --output $PP_PATH
+
+  #         # create temporary keychain
+  #         security create-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+  #         security set-keychain-settings -lut 21600 $KEYCHAIN_PATH
+  #         security unlock-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+
+  #         # import certificate to keychain
+  #         security import $CERTIFICATE_PATH -P "$P12_PASSWORD" -A -t cert -f pkcs12 -k $KEYCHAIN_PATH
+  #         security list-keychain -d user -s $KEYCHAIN_PATH
+
+  #         # apply provisioning profile
+  #         mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
+  #         cp $PP_PATH ~/Library/MobileDevice/Provisioning\ Profiles
+  #
+  #     - name: Install and set Flutter version
+  #       uses: subosito/flutter-action@v2
+  #       with:
+  #         channel: ${{env.FLUTTER_CHANNEL}}
+  #         flutter-version: ${{env.FLUTTER_VERSION}}
+  #         cache: true
+  #         cache-key: 'flutter-:os:-:channel:-:version:-:arch:-:hash:'
+  #         cache-path: '${{ runner.tool_cache }}/flutter/:channel:-:version:-:arch:'
+  #         architecture: x64
+  #     - run: flutter pub get
+  #     - run: flutter clean
+  #     # Zip into IPA from here:
+  #     # https://gist.github.com/devhammed/617d920b7ee886591a46c22633ab0093
+  #     - name: Build Flutter IPA
+  #       run: |
+  #         flutter build ios --release --dart-define FLAVOR=dev
+  #         cd build/ios/iphoneos
+  #         mkdir Payload
+  #         cd Payload
+  #         ln -s ../Runner.app
+  #         cd ..
+  #         zip -r app.ipa Payload
+  #     - name: Upload IPA
+  #       uses: actions/upload-artifact@v3
+  #       with:
+  #         name: ios_ipa
+  #         path: build/ios/iphoneos/
+
+  build_android:
+    name: Build Flutter for Android
+    needs: [flutter_test]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+      - name: Install and set Flutter version
+        uses: subosito/flutter-action@v2
+        with:
+          channel: ${{env.FLUTTER_CHANNEL}}
+          flutter-version: ${{env.FLUTTER_VERSION}}
+          cache: true
+          cache-key: "flutter-:os:-:channel:-:version:-:arch:-:hash:"
+          cache-path: "${{ runner.tool_cache }}/flutter/:channel:-:version:-:arch:"
+          architecture: x64
+
+      - name: Check Flutter Version
+        run: flutter --version
+
+      # Make environment variables available to the melos generate script.
+      #
+      # The environment variables need to be defined in the repository secrets
+      - name: Load Environment Variables
+        uses: oNaiPs/secrets-to-env-action@v1.2
+        with:
+          secrets: ${{ toJSON(secrets) }}
+
+      - name: Activate Melos
+        run: dart pub global activate melos ^3.4.0
+
+      - name: Bootstrap Melos
+        run: melos bootstrap
+
+      - name: Build Android APK and Appbundle
+        run: |
+          flutter pub get
+          flutter build apk --release --dart-define FLAVOR=dev
+          flutter build appbundle --release --dart-define FLAVOR=dev
+      - name: Upload APK
+        uses: actions/upload-artifact@v3
+        with:
+          name: android_apk
+          path: build/app/outputs/flutter-apk/*.apk
+      - name: Upload Appbundle
+        uses: actions/upload-artifact@v3
+        with:
+          name: android_appbundle
+          path: build/app/outputs/bundle/release/*.aab
+
+  build_windows:
+    name: Build Flutter for Windows
+    needs: [flutter_test]
+    runs-on: windows-latest
+    steps:
+      # Need to enable long paths for Windows because the forked version of go_router
+      # causes a long path error when building for Windows in CI
+      - name: Enable Git Long Paths
+        run: git config --system core.longpaths true
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+      - name: Install and set Flutter version
+        uses: subosito/flutter-action@v2
+        with:
+          channel: ${{env.FLUTTER_CHANNEL}}
+          flutter-version: ${{env.FLUTTER_VERSION}}
+          cache: true
+          cache-key: "flutter-:os:-:channel:-:version:-:arch:-:hash:"
+          cache-path: "${{ runner.tool_cache }}/flutter/:channel:-:version:-:arch:"
+          architecture: x64
+
+      - name: Check Flutter Version
+        run: flutter --version
+
+      # Make environment variables available to the melos generate script.
+      #
+      # The environment variables need to be defined in the repository secrets
+      - name: Load Environment Variables
+        uses: oNaiPs/secrets-to-env-action@v1.2
+        with:
+          secrets: ${{ toJSON(secrets) }}
+
+      - name: Activate Melos
+        run: dart pub global activate melos ^3.4.0
+
+      - name: Bootstrap Melos
+        run: melos bootstrap
+
+      - name: Build Windows
+        run: |
+          flutter pub get
+          flutter build windows --dart-define FLAVOR=dev "&" dart run msix:create --build-windows false
+      - name: Upload MSIX
+        uses: actions/upload-artifact@v3
+        with:
+          name: windows_release
+          path: build/windows/runner/Release/*.msix
+
+  build_linux:
+    name: Build Flutter for Linux
+    needs: [flutter_test]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+      - name: Install and set Flutter version
+        uses: subosito/flutter-action@v2
+        with:
+          channel: ${{env.FLUTTER_CHANNEL}}
+          flutter-version: ${{env.FLUTTER_VERSION}}
+          cache: true
+          cache-key: "flutter-:os:-:channel:-:version:-:arch:-:hash:"
+          cache-path: "${{ runner.tool_cache }}/flutter/:channel:-:version:-:arch:"
+          architecture: x64
+      - run: |
+          sudo apt-get update -y
+          sudo apt-get install -y ninja-build libgtk-3-dev
+
+      - name: Check Flutter Version
+        run: flutter --version
+
+      # Make environment variables available to the melos generate script.
+      #
+      # The environment variables need to be defined in the repository secrets
+      - name: Load Environment Variables
+        uses: oNaiPs/secrets-to-env-action@v1.2
+        with:
+          secrets: ${{ toJSON(secrets) }}
+
+      - name: Activate Melos
+        run: dart pub global activate melos ^3.4.0
+
+      - name: Bootstrap Melos
+        run: melos bootstrap
+
+      - name: Build Linux
+        run: |
+          flutter pub get
+          flutter build linux --release --dart-define FLAVOR=dev
+
+  build_macos:
+    name: Build Flutter for MacOS
+    needs: [flutter_test]
+    runs-on: macos-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+      - name: Install and set Flutter version
+        uses: subosito/flutter-action@v2
+        with:
+          channel: ${{env.FLUTTER_CHANNEL}}
+          flutter-version: ${{env.FLUTTER_VERSION}}
+          cache: true
+          cache-key: "flutter-:os:-:channel:-:version:-:arch:-:hash:"
+          cache-path: "${{ runner.tool_cache }}/flutter/:channel:-:version:-:arch:"
+          architecture: x64
+
+      - name: Check Flutter Version
+        run: flutter --version
+
+      # Make environment variables available to the melos generate script.
+      #
+      # The environment variables need to be defined in the repository secrets
+      - name: Load Environment Variables
+        uses: oNaiPs/secrets-to-env-action@v1.2
+        with:
+          secrets: ${{ toJSON(secrets) }}
+
+      - name: Activate Melos
+        run: dart pub global activate melos ^3.4.0
+
+      - name: Bootstrap Melos
+        run: melos bootstrap
+
+      - name: Build MacOS
+        run: |
+          flutter pub get
+          flutter build macos --release --dart-define FLAVOR=dev
+
+  build_web:
+    name: Build Flutter for Web
+    needs: [flutter_test]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+      - name: Install and set Flutter version
+        uses: subosito/flutter-action@v2
+        with:
+          channel: ${{env.FLUTTER_CHANNEL}}
+          flutter-version: ${{env.FLUTTER_VERSION}}
+          cache: true
+          cache-key: "flutter-:os:-:channel:-:version:-:arch:-:hash:"
+          cache-path: "${{ runner.tool_cache }}/flutter/:channel:-:version:-:arch:"
+
+      - name: Check Flutter Version
+        run: flutter --version
+
+      # Make environment variables available to the melos generate script.
+      #
+      # The environment variables need to be defined in the repository secrets
+      - name: Load Environment Variables
+        uses: oNaiPs/secrets-to-env-action@v1.2
+        with:
+          secrets: ${{ toJSON(secrets) }}
+
+      - name: Activate Melos
+        run: dart pub global activate melos ^3.4.0
+
+      - name: Bootstrap Melos
+        run: melos bootstrap
+
+      - name: Build Web
+        run: |
+          flutter pub get
+          flutter build web --dart-define FLAVOR=dev --release --web-renderer=canvaskit
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: web
+          path: build/web
+
+  deploy_web:
+    name: Deploy Flutter Web to GitHub Pages
+    runs-on: ubuntu-latest
+    needs: [build_web]
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+      - name: Install and set Flutter version
+        uses: subosito/flutter-action@v2
+        with:
+          channel: ${{env.FLUTTER_CHANNEL}}
+          flutter-version: ${{env.FLUTTER_VERSION}}
+          cache: true
+          cache-key: "flutter-:os:-:channel:-:version:-:arch:-:hash:"
+          cache-path: "${{ runner.tool_cache }}/flutter/:channel:-:version:-:arch:"
+      - name: Get branch name
+        id: branch-name
+        uses: tj-actions/branch-names@v8
+      - name: Build Web
+        run: |
+          flutter pub get
+          flutter build web --dart-define FLAVOR=staging --release --web-renderer=canvaskit --base-href="/${{ github.event.repository.name }}/${{ steps.branch-name.outputs.current_branch }}/"
+      - name: Deploy to GitHub Pages 🚀
+        uses: JamesIves/github-pages-deploy-action@releases/v4
+        with:
+          branch: gh-pages # The branch the action should deploy to.
+          folder: build/web # The folder the action should deploy.
+          target-folder: "${{ steps.branch-name.outputs.current_branch }}"
