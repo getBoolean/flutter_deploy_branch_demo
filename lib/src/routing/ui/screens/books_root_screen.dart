@@ -21,7 +21,7 @@ class _BooksRootScreenState extends State<BooksRootScreen> {
   Widget build(BuildContext context) {
     final deviceForm = $deviceForm(context);
     return ColoredBox(
-      color: Colors.blue,
+      color: Colors.red,
       child: Center(
         child: AnimatedFadeSwitcher(
           shouldSwitch: deviceForm.isNotSmall && widget.id != null,

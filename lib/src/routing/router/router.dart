@@ -169,7 +169,7 @@ StatefulShellBranch _buildBooksBranch(RouterDestination destination) {
         name: kBooksRouteName,
         path: '/books',
         titleBuilder: (BuildContext context, GoRouterState state) {
-          return 'Books';
+          return 'Books DEMO 2';
         },
         builder: (BuildContext context, GoRouterState state) {
           // only root routes should use query parameters because
