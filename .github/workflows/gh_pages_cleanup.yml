@@ -26,9 +26,13 @@ jobs:
           BASE_REF=$(printf "%q" "${{ github.event.ref }}")
           BASE_REF=${BASE_REF/refs\/heads\/}
 
-          echo "Deleting folder: $BASE_REF"
-          git rm -rf $BASE_REF
-          git commit -m "Remove deleted branch"
+          if test -d "$BASE_REF"; then
+            echo "Deleting folder: $BASE_REF"
+            git rm -rf "$BASE_REF"
+            git commit -m "Remove deleted branch"
+          else
+            echo "Folder $BASE_REF does not exist"
+          fi
       - name: Push changes
         uses: ad-m/github-push-action@master
         with:
