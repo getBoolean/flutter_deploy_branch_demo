@@ -29,4 +29,8 @@ jobs:
           echo "Deleting folder: $BASE_REF"
           git rm -rf $BASE_REF
           git commit -m "Remove deleted branch"
-          git push
+      - name: Push changes
+        uses: ad-m/github-push-action@master
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          branch: ${{ github.ref }}
